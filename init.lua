@@ -46,17 +46,17 @@ minetest.register_tool(maniacpickaxe_name, {
                 times = { [1] = 1.6, [2] = 1.2, [3] = 0.8 }
             },
         },
-        damage_groups = { fleshy=2 }
+        damage_groups = { fleshy = 2 }
     }
 })
+minetest.register_alias("maniacpickaxe", maniacpickaxe_name)
 
 minetest.register_craft({
-    output = maniacpickaxe_name .. " 1",
-    type = "shaped",
+    output = maniacpickaxe_name,
     recipe = {
-        {"default:diamond", "default:obsidian", "default:diamond"},
-        {""               , "default:stick"   ,                ""},
-        {""               , "default:gold"    ,                ""}
+        {"default:diamond", "default:obsidian"  , "default:diamond"},
+        {""               , "default:stick"     ,                ""},
+        {""               , "default:gold_ingot",                ""}
     }
 })
 
