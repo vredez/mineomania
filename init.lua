@@ -1,33 +1,36 @@
---[[
--- 
--- MINE-O-MANIA mod
--- 
--- AUTHOR: vredez
--- TODO: code cleanup
+-- MINE-O-MANIA mod for minetest
 --
---]]
+-- AUTHOR:  vredez
+-- VERSION: 1.0.0
 
---[[ CONFIG ]]--
--- Area of effect
-local aoe = 10
--- Allowed blocks
-local blocklist = {
-    ["default:clay"] = true,
+--[[ Configuration  ]]--
+
+-- node scanning area of effect (= number of nodes from the dug node to scan in each direction)
+local scan_aoe = 10
+
+-- node type whitelist
+local nodetype_whitelist = {
     ["default:stone_with_iron"] = true,
     ["default:stone_with_gold"] = true,
     ["default:stone_with_copper"] = true,
     ["default:stone_with_mese"] = true,
-    ["default:stone_with_mese"] = true,
     ["default:stone_with_diamond"] = true,
     ["default:stone_with_coal"] = true,
     ["default:stone_with_tin"] = true,
+    ["default:clay"] = true,
+    ["default:tree"] = true,
     ["default:mese"] = true
 }
---[[ === ]]--
+--[[ /Configuration ]]--
 
-minetest.register_tool("mineomania:maniac_pickaxe", {
+-- constants
+local maniacpickaxe_name = "mineomania:maniac_pickaxe"
+local attr_maniacmode = "maniac"
+
+-- initialization
+minetest.register_tool(maniacpickaxe_name, {
     description = "Maniac Pickaxe",
-    inventory_image = "bergonix.png",
+    inventory_image = "maniacpickaxe.png",
     tool_capabilities = {
         full_punch_interval = 1.5,
         max_drop_level = 1,
@@ -35,104 +38,144 @@ minetest.register_tool("mineomania:maniac_pickaxe", {
             crumbly = {
                 maxlevel = 3,
                 uses = 90,
-                times = { [1]=1.60, [2]=1.20, [3]=0.80 }
+                times = { [1] = 1.6, [2] = 1.2, [3] = 0.8 }
             },
             cracky = {
                 maxlevel = 3,
                 uses = 90,
-                times = { [1]=1.60, [2]=1.20, [3]=0.80 }
+                times = { [1] = 1.6, [2] = 1.2, [3] = 0.8 }
             },
         },
-        damage_groups = {fleshy=2}
+        damage_groups = { fleshy=2 }
     }
 })
-
-minetest.register_alias("maniac_pickaxe", "mineomania:maniac_pickaxe")
 
 minetest.register_craft({
+    output = maniacpickaxe_name.." 1",
     type = "shaped",
-    output = "mineomania:maniac_pickaxe 1",
     recipe = {
         {"default:diamond", "default:obsidian", "default:diamond"},
-        {"", "default:stick", ""},
-        {"", "default:stick", ""}
+        {""               , "default:stick"   ,                ""},
+        {""               , "default:gold"    ,                ""}
     }
 })
 
-function scan_adjacent_nodes(id, data, flags, pos, origin, va, va_real, scan_candidates, matches)
+function scan_adjacent_nodes(
+    pos,                 -- position of the center node
+    id,                  -- id to scan for
+    map_data,            -- map data containing ids
+    scanned_flags,       -- data flagging already scanned nodes
+    va,                  -- voxel area helper of the map data
+    va_scope,            -- voxel area helper of the scanning scope
+    scan_position_stack, -- stack of positions that need to be scanned
+    matches              -- list of found voxel area indices
+    )
     for z = pos.z - 1, pos.z + 1 do 
         for y = pos.y - 1, pos.y + 1 do
             for x = pos.x - 1, pos.x + 1 do
                 local vec = vector.new(x, y, z)
-                if va_real:containsp(vec) and not vector.equals(vec, pos) then
+                -- only consider adjacent nodes that are contained within the scope
+                if va_scope:containsp(vec) and not vector.equals(vec, pos) then
                     local vi = va:index(x, y, z)
 
-                    if not flags[vi] and data[vi] == id then
+                    -- new match = not alreay scanned and id match
+                    if not scanned_flags[vi] and map_data[vi] == id then
                         table.insert(matches, vi)
-                        table.insert(scan_candidates, { p = vec, o = pos })
+                        table.insert(scan_position_stack, vec)
                     end
 
-                    flags[vi] = true
+                    -- flag as scanned
+                    scanned_flags[vi] = true
                 end
             end
         end
     end
 end
 
-function dig_with_tool(pos, digger)
-    return true
+local function on_joinplayer_handler(player)
+    -- reset maniac mode, in case player connection broke or serve crashed
+    player:set_attribute(attr_maniacmode, nil)
 end
- 
-minetest.register_on_dignode(function(pos, oldnode, digger)
-    local wielded = digger:get_wielded_item()
 
-    if not wielded or wielded:get_name() ~= "mineomania:maniac_pickaxe" or not blocklist[oldnode.name] then
-        return false
+local function on_dignode_handler(pos, oldnode, digger)
+    local tool = digger:get_wielded_item()
+
+    if not tool or tool:get_name() ~= maniacpickaxe_name or not nodetype_whitelist[oldnode.name] then
+        return nil
     end
 
-    if digger:get_attribute("maniac") then
-        return false
+    -- avoid recursive handler invokation
+    if digger:get_attribute(attr_maniacmode) then
+        return nil
     end
+    digger:set_attribute(attr_maniacmode, "1")
 
-    digger:set_attribute("maniac", "1")
-
-    local minedge = vector.add(pos, -aoe)
-    local maxedge = vector.add(pos, aoe)
+    -- load map data
+    local pos_min = vector.add(pos, -scan_aoe)
+    local pos_max = vector.add(pos, scan_aoe)
 
     local vm = minetest.get_voxel_manip()
-    local pmin, pmax = vm:read_from_map(minedge, maxedge)
+    local pos_min_actual, pos_max_actual = vm:read_from_map(pos_min, pos_max)
+    local map_data = vm:get_data()
 
-    local data = vm:get_data()
-    local va = VoxelArea:new{ MinEdge = pmin, MaxEdge = pmax }
-    local va_real = VoxelArea:new{ MinEdge = minedge, MaxEdge = maxedge }
+    local va = VoxelArea:new { MinEdge = pos_min_actual, MaxEdge = pos_max_actual }
+    local va_scope = VoxelArea:new { MinEdge = pos_min, MaxEdge = pos_max }
 
-    local flags = {}
+    --[[ ===============================
+    -- iterative node scanning procedure
+    --   =============================== ]]
+    local match_indices = {}
+    local already_scanned_flags = {}
+    local scan_position_stack = {}
 
-    local scan_candidates = {}
-    local matches = {}
+    -- type id to scan for
+    local type_id = minetest.get_content_id(oldnode.name)
 
-    local id = minetest.get_content_id(oldnode.name)
+    -- first scan candidate is the actual dug node
+    local scan_position = pos
 
-    -- scan all around first node (origin nil)
-    local candidate = { p = pos, o = nil }
+    while scan_position do
+        scan_adjacent_nodes(
+            scan_position,
+            type_id,
+            map_data,
+            already_scanned_flags,
+            va,
+            va_scope,
+            scan_position_stack,
+            match_indices)
 
-    while candidate ~= nil do
-        scan_adjacent_nodes(id, data, flags, candidate.p, candidate.o, va, va_real, scan_candidates, matches)
-        candidate = table.remove(scan_candidates)
+        -- pop from stack
+        scan_position = table.remove(scan_position_stack)
     end
+    --[[ =============================== ]]
 
-    local actual_number = 1 -- start with 1 since one node was digged in the default mode
-
-    for k, v in pairs(matches) do
+    local dug_node_count = 1 -- start with 1 since one node is already dug
+    
+    for k, v in pairs(match_indices) do
         local match_pos = va:position(v)
-        minetest.node_dig(match_pos, vm:get_node_at(match_pos) ,digger)
-        actual_number = actual_number + 1
-        if wielded:get_count() == 0 then
+
+        -- perform dig
+        minetest.node_dig(match_pos, vm:get_node_at(match_pos), digger)
+        dug_node_count = dug_node_count + 1
+
+        -- stop on tool depletion
+        if tool:get_count() == 0 then
             break
         end
     end
 
-    minetest.chat_send_player(digger:get_player_name(), string.format("%s x%i", minetest.registered_nodes[oldnode.name].description, actual_number))
+    -- notify player
+    minetest.chat_send_player(
+        digger:get_player_name(),
+        string.format(
+            "%s x%i",
+            minetest.registered_nodes[oldnode.name].description,
+            dug_node_count))
 
-    digger:set_attribute("maniac", nil)
-end)
+    digger:set_attribute(attr_maniacmode, nil)
+end
+
+-- callbacks
+minetest.register_on_joinplayer(on_joinplayer_handler)
+minetest.register_on_dignode(on_dignode_handler)
