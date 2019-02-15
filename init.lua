@@ -51,7 +51,7 @@ minetest.register_tool(maniacpickaxe_name, {
 })
 
 minetest.register_craft({
-    output = maniacpickaxe_name.." 1",
+    output = maniacpickaxe_name .. " 1",
     type = "shaped",
     recipe = {
         {"default:diamond", "default:obsidian", "default:diamond"},
