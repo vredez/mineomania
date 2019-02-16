@@ -26,6 +26,7 @@ local nodetype_whitelist = {
 -- constants
 local maniacpickaxe_name = "mineomania:maniac_pickaxe"
 local attr_maniacmode = "maniac"
+local soundprefix = "mineomania_maniacpickaxe"
 
 -- initialization
 minetest.register_tool(maniacpickaxe_name, {
@@ -158,6 +159,8 @@ local function on_dignode_handler(pos, oldnode, digger)
         -- perform dig
         minetest.node_dig(match_pos, vm:get_node_at(match_pos), digger)
         dug_node_count = dug_node_count + 1
+        minetest.sound_play(soundprefix, { pos = match_pos, gain = 1.0, max_hear_distance = 32 })
+
 
         -- stop on tool depletion
         if tool:get_count() == 0 then
