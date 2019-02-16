@@ -29,6 +29,17 @@ local attr_maniacmode = "maniac"
 local soundprefix = "mineomania_maniacpickaxe"
 
 -- initialization
+
+-- fill above blacklist with all node types that can fall down
+local above_blacklist = {}
+minetest.after(0, function()
+    for k, v in pairs(minetest.registered_items) do
+        if v.groups.falling_node then
+            above_blacklist[minetest.get_content_id(k)] = true
+        end
+    end
+end)
+
 minetest.register_tool(maniacpickaxe_name, {
     description = "Maniac Pickaxe",
     inventory_image = "maniacpickaxe.png",
@@ -79,7 +90,7 @@ function scan_adjacent_nodes(
                 if va_scope:containsp(vec) and not vector.equals(vec, pos) then
                     local vi = va:index(x, y, z)
 
-                    -- new match = not alreay scanned and id match
+                    -- new match = not already scanned && id matches
                     if not scanned_flags[vi] and map_data[vi] == id then
                         table.insert(matches, vi)
                         table.insert(scan_position_stack, vec)
@@ -155,16 +166,18 @@ local function on_dignode_handler(pos, oldnode, digger)
     
     for k, v in pairs(match_indices) do
         local match_pos = va:position(v)
+        local above_pos = vector.add(match_pos, vector.new(0, 1, 0))
 
-        -- perform dig
-        minetest.node_dig(match_pos, vm:get_node_at(match_pos), digger)
-        dug_node_count = dug_node_count + 1
-        minetest.sound_play(soundprefix, { pos = match_pos, gain = 1.0, max_hear_distance = 32 })
+        -- perform dig only if no falling nodes are above
+        if not va:containsp(above_pos) or not above_blacklist[map_data[va:indexp(above_pos)]] then
+            minetest.node_dig(match_pos, vm:get_node_at(match_pos), digger)
+            dug_node_count = dug_node_count + 1
+            minetest.sound_play(soundprefix, { pos = match_pos, gain = 1.0, max_hear_distance = 32 })
 
-
-        -- stop on tool depletion
-        if tool:get_count() == 0 then
-            break
+            -- stop on tool depletion
+            if tool:get_count() == 0 then
+                break
+            end
         end
     end
 
